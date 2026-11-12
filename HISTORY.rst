@@ -2,6 +2,17 @@
 History
 =======
 
+Unreleased
+----------
+
+* Added ``extruct.extract_report``, which returns ``{"data": ..., "issues": ...}``
+  and isolates a broken metadata block instead of discarding the whole syntax
+  output. JSON-LD failures drop only the offending script, while microdata
+  failures (extraction or uniform conversion) drop only the owning top-level
+  entry. Each issue records the syntax, failure stage, root XPath of the failing
+  unit and exception type; nested failures are reported once. JSON-LD and
+  microdata are supported, from strings, bytes or parsed trees.
+
 v0.18.0 (2024-11-08)
 --------------------
 

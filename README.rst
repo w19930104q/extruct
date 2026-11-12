@@ -275,6 +275,39 @@ To do so set ``uniform=True`` when calling ``extract``, it's false by default fo
 
 NB rdfa structure is not uniformed yet.
 
+Extraction report
++++++++++++++++++
+
+A single broken metadata block should not make you lose the rest of the page.
+``extruct.extract_report`` extracts JSON-LD and microdata, isolating each
+failure instead of dropping the whole syntax output: ::
+
+  >>> report = extruct.extract_report(htmlstring, base_url=base_url)
+  >>> report.keys()
+  dict_keys(['data', 'issues'])
+
+``data`` has the same shape as ``extract``'s output for the requested
+syntaxes; ``issues`` lists every unit that was skipped, one issue per unit.
+A malformed JSON-LD script only loses that script, and a failing microdata
+entry (during extraction or, with ``uniform=True``, during the uniform
+conversion) only loses the owning top-level entry; healthy entries keep their
+values and order, and nested failures are never reported twice.
+
+Each issue contains the syntax, the failure stage (``"extraction"`` or
+``"uniform"``), the root XPath of the failing unit, the exception type and its
+message: ::
+
+  >>> pp.pprint(report['issues'])
+  [{'syntax': 'json-ld',
+    'stage': 'extraction',
+    'xpath': '/html/head/script[2]',
+    'exception_type': 'JSONDecodeError',
+    'message': 'Expecting value: line 1 column 13 (char 12)'}]
+
+Strings, bytes and parsed lxml trees are all accepted; a passed tree is not
+modified. The legacy ``extract`` function and its ``strict``/``log``/``ignore``
+``errors`` behaviour are unchanged.
+
 Returning HTML node
 +++++++++++++++++++
 

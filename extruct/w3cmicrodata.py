@@ -82,6 +82,57 @@ class LxmlMicrodataExtractor:
             if item
         ]
 
+    def extract_items_report(
+        self, document: Any, base_url: Any
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[Any]]:
+        """Extract microdata items, isolating failures to top-level entries.
+
+        Each top-level ``itemscope`` node is extracted independently: if one
+        entry fails, only that entry is dropped and reported, while healthy
+        entries keep their values and document order. Nested failures are not
+        reported separately, because they surface as the failure of the
+        top-level entry that owns them.
+
+        Returns the extracted items, the issues and the source node of every
+        extracted item, so later processing stages can still locate it.
+        """
+        itemids = self._build_itemids(document)
+        items_seen: set[Any] = set()
+        items: list[dict[str, Any]] = []
+        nodes: list[Any] = []
+        issues: list[dict[str, Any]] = []
+        for node in self._xp_item(document):
+            docid = itemids.get(node)
+            if self.nested and docid in items_seen:
+                continue
+            try:
+                item = self._extract_item(
+                    node,
+                    items_seen=items_seen,
+                    base_url=base_url,
+                    itemids=itemids,
+                )
+            except Exception as e:
+                # Nested itemscope nodes reached while the failed entry was
+                # built are already marked as seen; mark the remaining ones so
+                # the broken entry cannot re-surface as orphan top-level items.
+                for nested in self._xp_item(node):
+                    items_seen.add(itemids[nested])
+                issues.append(
+                    {
+                        "syntax": "microdata",
+                        "stage": "extraction",
+                        "xpath": node.getroottree().getpath(node),
+                        "exception_type": type(e).__name__,
+                        "message": str(e),
+                    }
+                )
+            else:
+                if item:
+                    items.append(item)
+                    nodes.append(node)
+        return items, issues, nodes
+
     def get_docid(self, node, itemids):
         return itemids[node]
 

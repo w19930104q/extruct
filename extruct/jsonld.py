@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import re
+from typing import Any
 
 import jstyleson
 import lxml.etree
@@ -216,6 +217,35 @@ class JsonLdExtractor:
             for item in items
             if item
         ]
+
+    def extract_items_report(
+        self, document: Any, base_url: Any = None
+    ) -> tuple[list[Any], list[dict[str, Any]]]:
+        """Extract JSON-LD items, isolating failures to individual scripts.
+
+        A script that cannot be parsed is dropped on its own; every other
+        script on the page still contributes its items, in document order.
+        Each failure is returned once, as an issue describing the failing
+        script node and the exception it raised.
+        """
+        items: list[Any] = []
+        issues: list[dict[str, Any]] = []
+        for node in self._xp_jsonld(document):
+            try:
+                node_items = [item for item in self._extract_items(node) if item]
+            except Exception as e:
+                issues.append(
+                    {
+                        "syntax": "json-ld",
+                        "stage": "extraction",
+                        "xpath": node.getroottree().getpath(node),
+                        "exception_type": type(e).__name__,
+                        "message": str(e),
+                    }
+                )
+            else:
+                items.extend(node_items)
+        return items, issues
 
     def _extract_items(self, node):
         script = node.xpath("string()").strip()

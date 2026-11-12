@@ -1,4 +1,4 @@
-from ._extruct import SYNTAXES, extract
+from ._extruct import REPORT_SYNTAXES, SYNTAXES, extract, extract_report
 from .jsonld import JsonLdExtractor
 from .microformat import MicroformatExtractor
 from .opengraph import OpenGraphExtractor

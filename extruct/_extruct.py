@@ -11,12 +11,18 @@ from extruct.jsonld import JsonLdExtractor
 from extruct.microformat import MicroformatExtractor
 from extruct.opengraph import OpenGraphExtractor
 from extruct.rdfa import RDFaExtractor
-from extruct.uniform import _udublincore, _umicrodata_microformat, _uopengraph
+from extruct.uniform import (
+    _udublincore,
+    _umicrodata_microformat,
+    _uopengraph,
+    flatten_dict,
+)
 from extruct.utils import parse_html, parse_xmldom_html
 from extruct.w3cmicrodata import MicrodataExtractor
 
 logger = logging.getLogger(__name__)
 SYNTAXES = ["microdata", "opengraph", "json-ld", "microformat", "rdfa", "dublincore"]
+REPORT_SYNTAXES = ["microdata", "json-ld"]
 
 
 def extract(
@@ -199,3 +205,92 @@ def extract(
                     raise
 
     return output
+
+
+def extract_report(
+    htmlstring_or_tree: str | bytes | HtmlElement,
+    base_url: str | None = None,
+    encoding: str = "UTF-8",
+    syntaxes: list[str] = REPORT_SYNTAXES,
+    uniform: bool = False,
+    return_html_node: bool = False,
+    schema_context: str = "http://schema.org",
+) -> dict[str, Any]:
+    """Extract metadata without letting one broken block discard the rest.
+
+    Unlike :func:`extract`, a single malformed metadata unit never fails the
+    whole syntax: the unit is skipped and described in ``issues`` while every
+    healthy unit is still returned in ``data``. Only JSON-LD and microdata are
+    supported.
+
+    :param htmlstring_or_tree: an HTML string, bytes or a parsed lxml tree;
+        a passed tree is never modified.
+    :param syntaxes: any subset of ``["microdata", "json-ld"]``.
+    :param uniform: uniform the microdata output, isolating uniform failures
+        to the top-level entry that causes them.
+    :returns: ``{"data": {syntax: [items]}, "issues": [issue, ...]}``. Each
+        issue holds the ``syntax``, the failed ``stage`` (``"extraction"`` or
+        ``"uniform"``), the root XPath of the failing unit, the exception type
+        and its message. Nested failures are reported once, on the top-level
+        unit that owns them.
+    """
+    if not (isinstance(syntaxes, list) and all(v in REPORT_SYNTAXES for v in syntaxes)):
+        raise ValueError(
+            "syntaxes must be a list with any or all (default) of"
+            "these values: {}".format(REPORT_SYNTAXES)
+        )
+    if isinstance(htmlstring_or_tree, (str, bytes)):
+        tree = parse_html(htmlstring_or_tree, encoding=encoding)
+    else:
+        tree = htmlstring_or_tree
+
+    data: dict[str, list[Any]] = {}
+    issues: list[dict[str, Any]] = []
+
+    if "microdata" in syntaxes:
+        microdata, microdata_issues, microdata_nodes = MicrodataExtractor(
+            add_html_node=return_html_node
+        ).extract_items_report(tree, base_url)
+        issues.extend(microdata_issues)
+        if uniform:
+            microdata, uniform_issues = _uniform_microdata_report(
+                microdata, microdata_nodes, schema_context
+            )
+            issues.extend(uniform_issues)
+        data["microdata"] = microdata
+
+    if "json-ld" in syntaxes:
+        jsonld_items, jsonld_issues = JsonLdExtractor().extract_items_report(
+            tree, base_url=base_url
+        )
+        data["json-ld"] = jsonld_items
+        issues.extend(jsonld_issues)
+
+    return {"data": data, "issues": issues}
+
+
+def _uniform_microdata_report(
+    items: list[dict[str, Any]],
+    nodes: list[HtmlElement],
+    schema_context: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    uniform_items: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    for item, node in zip(items, nodes):
+        try:
+            uniform_items.append(flatten_dict(item, schema_context, True))
+        except Exception as e:
+            issues.append(_build_issue("microdata", "uniform", node, e))
+    return uniform_items, issues
+
+
+def _build_issue(
+    syntax: str, stage: str, node: HtmlElement, exception: Exception
+) -> dict[str, Any]:
+    return {
+        "syntax": syntax,
+        "stage": stage,
+        "xpath": node.getroottree().getpath(node),
+        "exception_type": type(exception).__name__,
+        "message": str(exception),
+    }
